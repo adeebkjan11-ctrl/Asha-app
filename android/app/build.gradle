@@ -1,0 +1,17 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'org.ashasaathi.app'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'org.ashasaathi.app'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+    }
+    buildTypes {
+        debug { applicationIdSuffix '.preview'; versionNameSuffix '-preview'; debuggable false }
+        release { minifyEnabled false }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
