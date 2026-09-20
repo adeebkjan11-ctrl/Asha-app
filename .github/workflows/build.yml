@@ -1,0 +1,25 @@
+name: Prepare ASHA Saathi source
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  import-source:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out uploaded source
+        uses: actions/checkout@v4
+      - name: Verify and restore application files
+        run: |
+          printf '%s  %s\n' 'ba8ecb9cc8e72e4488344ba5795072f2b3f1c3931996435808c027307d34c212' 'ASHA-Saathi-source.zip' | sha256sum --check
+          unzip -o ASHA-Saathi-source.zip -x '.github/*'
+          rm -- ASHA-Saathi-source.zip
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Import verified ASHA Saathi application source'
+          git push origin HEAD:main
