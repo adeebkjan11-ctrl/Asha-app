@@ -1,25 +1,117 @@
-name: Prepare ASHA Saathi source
+name: Build ASHA Saathi
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: asha-build-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  import-source:
-    if: github.ref == 'refs/heads/main'
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
+    timeout-minutes: 30
     steps:
-      - name: Check out uploaded source
-        uses: actions/checkout@v4
-      - name: Verify and restore application files
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install test tooling
+        run: npm ci
+      - name: Check source
+        run: npm run check
+      - name: Test data and permissions
         run: |
-          printf '%s  %s\n' 'ba8ecb9cc8e72e4488344ba5795072f2b3f1c3931996435808c027307d34c212' 'ASHA-Saathi-source.zip' | sha256sum --check
-          unzip -o ASHA-Saathi-source.zip -x '.github/*'
-          rm -- ASHA-Saathi-source.zip
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'Import verified ASHA Saathi application source'
-          git push origin HEAD:main
+          mkdir -p artifacts
+          node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=artifacts/unit-results.xml test/*.test.mjs
+      - name: Install Chromium for browser checks
+        run: npx playwright install --with-deps chromium
+      - name: Test desktop, mobile, and offline workflows
+        run: npm run test:ui
+      - name: Package server and web app
+        run: npm run build
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Install Android build platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build and lint Android APK
+        run: gradle -p android assembleDebug lintDebug --no-daemon
+      - name: Prepare downloadable artifacts
+        run: |
+          mkdir -p dist/android
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/android/ASHA-Saathi-preview.apk
+          cp docs/ANDROID-INSTALL.md dist/android/ANDROID-INSTALL.md
+          cp dist/BUILD-INFO.json dist/android/BUILD-INFO.json
+          sha256sum dist/android/ASHA-Saathi-preview.apk > dist/android/SHA256SUMS.txt
+          git archive --format=zip --output=dist/ASHA-Saathi-source.zip HEAD
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASHA-Saathi-Android-APK
+          path: dist/android/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload server package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASHA-Saathi-Server
+          path: dist/server/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload web app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASHA-Saathi-Web-App
+          path: dist/web/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload logo and icons
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASHA-Saathi-Brand
+          path: dist/brand/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASHA-Saathi-Source
+          path: dist/ASHA-Saathi-source.zip
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload verification results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ASHA-Saathi-Test-Results
+          path: |
+            artifacts/
+            android/app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Write build summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ## ASHA Saathi preview is ready
+          - **Android APK**: install the preview package and choose **Explore the demo**, or connect your HTTPS server.
+          - **Server**: Node.js 24 application with SQLite, encrypted records, worker permissions and administrator accounts.
+          - **Web app**: browser interface and offline app assets.
+          - **Brand**: logo and installable app icons.
+          - **Source**: the exact source revision used in this build.
+          - **Test results**: permission/domain tests, browser workflows, screenshots and Android lint report.
+
+          The APK is signed with a temporary debug key for preview installation. A configured server is required for shared live data. See the installation and deployment instructions before a live pilot.
+          SUMMARY
